@@ -4,4 +4,4 @@ a minimal <a href="https://hunterirving.github.io/web_workshop/pages/pwa">Progre
 
 makes it easy for local friends to install your other PWAs :-)
 
-<img src="screenshot.jpeg">
+<img src="screenshot.jpeg" width=400px;>
