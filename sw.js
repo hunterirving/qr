@@ -1,9 +1,9 @@
-const CACHE_NAME = 'qr-v2';
+const CACHE_NAME = 'qr-v3';
 const urlsToCache = [
   '/qr/',
   '/qr/index.html',
   '/qr/manifest.json',
-  '/qr/app_icon.png'
+  '/qr/icon.png'
 ];
 
 // Install service worker and cache resources
