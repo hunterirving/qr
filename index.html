@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>qr</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="default">
+	<meta name="theme-color" content="#ffffff">
+	<link rel="manifest" href="manifest.json">
+	<link rel="apple-touch-icon" href="app_icon.png">
+	<link rel="icon" href="app_icon.png">
+	<style>
+		html {
+			overscroll-behavior: none;
+			height: 100%;
+			overflow: hidden; 
+		}
+
+		body {
+			margin: 0;
+			font-family: system-ui, sans-serif;
+			overscroll-behavior: none;
+			height: 100%;
+			overflow: hidden;
+		}
+
+		.container {
+			max-width: 1000px;
+			width: 100%;
+			margin: 0 auto;
+			padding: 16px;
+			padding-top: 8px;
+			display: flex;
+			flex-direction: column;
+			align-items: center; 
+			height: 100vh;
+			overflow: hidden;
+			box-sizing: border-box;
+		}
+
+		#url-input {
+			width: 100%;
+			box-sizing: border-box;
+			font-size: 32px;
+			border: none;
+			margin: 0;
+			padding: 0 0 16px 0;
+			outline: none;
+		}
+
+		#url-input::selection {
+			color: white;
+			background-color: black;
+		}
+
+		#qr-canvas {
+			display: block;
+			flex: 1;
+			min-height: 0;
+			max-width: 100%;
+			object-fit: contain;
+			width: auto;
+			height: auto;
+			aspect-ratio: 1 / 1;
+			background: white;
+			box-sizing: border-box;
+		}
+	</style>
+</head>
+<body>
+	<div class="container">
+		<input type="text" id="url-input" placeholder="enter a URL..." autocomplete="off" autofocus>
+		<canvas id="qr-canvas"></canvas>
+	</div>
+
+	<script>
+		const input = document.getElementById('url-input');
+		const canvas = document.getElementById('qr-canvas');
+		const ctx = canvas.getContext('2d');
+		ctx.imageSmoothingEnabled = false;
+
+		// Galois Field tables for Reed-Solomon
+		const GF_EXP = new Array(512);
+		const GF_LOG = new Array(256);
+
+		(function initGF() {
+			let x = 1;
+			for (let i = 0; i < 255; i++) {
+				GF_EXP[i] = x;
+				GF_LOG[x] = i;
+				x <<= 1;
+				if (x & 0x100) x ^= 0x11d;
+			}
+			for (let i = 255; i < 512; i++) {
+				GF_EXP[i] = GF_EXP[i - 255];
+			}
+		})();
+
+		function gfMul(a, b) {
+			if (a === 0 || b === 0) return 0;
+			return GF_EXP[GF_LOG[a] + GF_LOG[b]];
+		}
+
+		// Alignment pattern positions lookup table (from QR spec)
+		const ALIGNMENT_POSITIONS = [
+			null,
+			[],
+			[6, 18],
+			[6, 22],
+			[6, 26],
+			[6, 30],
+			[6, 34],
+			[6, 22, 38],
+			[6, 24, 42],
+			[6, 26, 46],
+			[6, 28, 50],
+			[6, 30, 54],
+			[6, 32, 58],
+			[6, 34, 62],
+			[6, 26, 46, 66],
+			[6, 26, 48, 70],
+			[6, 26, 50, 74],
+			[6, 30, 54, 78],
+			[6, 30, 56, 82],
+			[6, 30, 58, 86],
+			[6, 34, 62, 90],
+			[6, 28, 50, 72, 94],
+			[6, 26, 50, 74, 98],
+			[6, 30, 54, 78, 102],
+			[6, 28, 54, 80, 106],
+			[6, 32, 58, 84, 110],
+			[6, 30, 58, 86, 114],
+			[6, 34, 62, 90, 118],
+			[6, 26, 50, 74, 98, 122],
+			[6, 30, 54, 78, 102, 126],
+			[6, 26, 52, 78, 104, 130],
+			[6, 30, 56, 82, 108, 134],
+			[6, 34, 60, 86, 112, 138],
+			[6, 30, 58, 86, 114, 142],
+			[6, 34, 62, 90, 118, 146],
+			[6, 30, 54, 78, 102, 126, 150],
+			[6, 24, 50, 76, 102, 128, 154],
+			[6, 28, 54, 80, 106, 132, 158],
+			[6, 32, 58, 84, 110, 136, 162],
+			[6, 26, 54, 82, 110, 138, 166],
+			[6, 30, 58, 86, 114, 142, 170]
+		];
+
+		// EC_TABLE: [totalDataCodewords, ecPerBlock, group1Blocks, group1Data, group2Blocks, group2Data]
+		const EC_TABLE = [
+			null,
+			[16, 10, 1, 16, 0, 0],     // V1
+			[28, 16, 1, 28, 0, 0],     // V2
+			[44, 26, 1, 44, 0, 0],     // V3
+			[64, 18, 2, 32, 0, 0],     // V4
+			[86, 24, 2, 43, 0, 0],     // V5
+			[108, 16, 4, 27, 0, 0],    // V6
+			[124, 18, 4, 31, 0, 0],    // V7
+			[154, 22, 2, 38, 2, 39],   // V8
+			[182, 22, 3, 36, 2, 37],   // V9
+			[216, 26, 4, 43, 1, 44],   // V10
+			[254, 30, 1, 50, 4, 51],   // V11
+			[290, 22, 6, 36, 2, 37],   // V12
+			[334, 22, 8, 37, 1, 38],   // V13
+			[365, 24, 4, 40, 5, 41],   // V14
+			[415, 24, 5, 41, 5, 42],   // V15
+			[453, 28, 7, 45, 3, 46],   // V16
+			[507, 28, 10, 46, 1, 47],  // V17
+			[563, 26, 9, 43, 4, 44],   // V18
+			[627, 26, 3, 44, 11, 45],  // V19
+			[669, 26, 3, 41, 13, 42],  // V20
+			[714, 26, 17, 42, 0, 0],   // V21
+			[782, 28, 17, 46, 0, 0],   // V22
+			[860, 28, 4, 47, 14, 48],  // V23
+			[914, 28, 6, 45, 14, 46],  // V24
+			[1000, 28, 8, 47, 13, 48], // V25
+			[1062, 28, 19, 46, 4, 47], // V26
+			[1128, 28, 22, 45, 3, 46], // V27
+			[1193, 28, 3, 45, 23, 46], // V28
+			[1267, 28, 21, 45, 7, 46], // V29
+			[1373, 28, 19, 47, 10, 48],// V30
+			[1455, 28, 2, 46, 29, 47], // V31
+			[1541, 28, 10, 46, 23, 47],// V32
+			[1631, 28, 14, 46, 21, 47],// V33
+			[1725, 28, 14, 46, 23, 47],// V34
+			[1812, 28, 12, 47, 26, 48],// V35
+			[1914, 28, 6, 47, 34, 48], // V36
+			[1992, 28, 29, 46, 14, 47],// V37
+			[2102, 28, 13, 46, 32, 47],// V38
+			[2216, 28, 40, 47, 7, 48], // V39
+			[2334, 28, 18, 47, 31, 48] // V40
+		];
+
+		function getVersion(byteLength) {
+			for (let v = 1; v <= 40; v++) {
+				const charCountBits = v <= 9 ? 8 : 16;
+				const dataBits = 4 + charCountBits + byteLength * 8;
+				const dataBytes = Math.ceil(dataBits / 8);
+				if (dataBytes <= EC_TABLE[v][0]) return v;
+			}
+			return 40;
+		}
+
+		const MAX_CAPACITY = 2331; // Max bytes for V40-M
+
+		function generateQR(text) {
+			if (!text) {
+				canvas.width = 0;
+				canvas.height = 0;
+				return;
+			}
+
+			const bytes = new TextEncoder().encode(text);
+			if (bytes.length > MAX_CAPACITY) {
+				// Render solid black square when over capacity
+				const size = 177 * 32; // V40 size
+				canvas.width = size;
+				canvas.height = size;
+				ctx.fillStyle = '#000000';
+				ctx.fillRect(0, 0, size, size);
+				return;
+			}
+
+			const qr = createQR(text);
+			const moduleSize = 32;
+			const margin = 0;
+			const size = qr.length * moduleSize + margin * 2 * moduleSize;
+
+			canvas.width = size;
+			canvas.height = size;
+
+			ctx.fillStyle = '#ffffff';
+			ctx.fillRect(0, 0, size, size);
+
+			ctx.fillStyle = '#000000';
+			for (let row = 0; row < qr.length; row++) {
+				for (let col = 0; col < qr.length; col++) {
+					if (qr[row][col]) {
+						ctx.fillRect(
+							(col + margin) * moduleSize,
+							(row + margin) * moduleSize,
+							moduleSize,
+							moduleSize
+						);
+					}
+				}
+			}
+		}
+
+		function createQR(text) {
+			const bytes = new TextEncoder().encode(text);
+			const version = getVersion(bytes.length);
+			const size = version * 4 + 17;
+			const matrix = Array.from({ length: size }, () => Array(size).fill(null));
+
+			// Add function patterns in correct order
+			addFinderPatterns(matrix, size);
+			addSeparators(matrix, size);
+			addTimingPatterns(matrix, size);
+			addAlignmentPatterns(matrix, version, size);
+			addDarkModule(matrix, version);
+
+			// Reserve format and version info areas
+			reserveFormatAreas(matrix, size);
+			if (version >= 7) reserveVersionAreas(matrix, size);
+
+			// Create reserved map for masking
+			const reserved = createReservedMap(matrix, size);
+
+			// Encode and place data
+			const data = encodeData(bytes, version);
+			const ecData = addErrorCorrection(data, version);
+			placeData(matrix, ecData, size);
+
+			// Apply mask and add format/version info
+			const mask = applyBestMask(matrix, size, reserved);
+			addFormatInfo(matrix, size, mask);
+			if (version >= 7) addVersionInfo(matrix, version, size);
+
+			return matrix;
+		}
+
+		// Finder pattern: 7x7 with specific structure
+		// Outer black border, inner white border, center 3x3 black
+		function addFinderPatterns(matrix, size) {
+			const positions = [
+				[0, 0],           // top-left
+				[0, size - 7],    // top-right
+				[size - 7, 0]     // bottom-left
+			];
+
+			for (const [startRow, startCol] of positions) {
+				for (let r = 0; r < 7; r++) {
+					for (let c = 0; c < 7; c++) {
+						let isBlack;
+						// Outer border (row 0, 6 or col 0, 6)
+						if (r === 0 || r === 6 || c === 0 || c === 6) {
+							isBlack = true;
+						}
+						// Inner white border (row 1, 5 or col 1, 5)
+						else if (r === 1 || r === 5 || c === 1 || c === 5) {
+							isBlack = false;
+						}
+						// Center 3x3 black
+						else {
+							isBlack = true;
+						}
+						matrix[startRow + r][startCol + c] = isBlack ? 1 : 0;
+					}
+				}
+			}
+		}
+
+		// Separators: 1-module white border around finder patterns
+		function addSeparators(matrix, size) {
+			// Top-left finder separator
+			for (let i = 0; i < 8; i++) {
+				matrix[7][i] = 0;  // horizontal below
+				matrix[i][7] = 0;  // vertical right
+			}
+
+			// Top-right finder separator
+			for (let i = 0; i < 8; i++) {
+				matrix[7][size - 8 + i] = 0;  // horizontal below
+				matrix[i][size - 8] = 0;      // vertical left
+			}
+
+			// Bottom-left finder separator
+			for (let i = 0; i < 8; i++) {
+				matrix[size - 8][i] = 0;      // horizontal above
+				matrix[size - 8 + i][7] = 0;  // vertical right
+			}
+		}
+
+		// Timing patterns: alternating black/white on row 6 and column 6
+		function addTimingPatterns(matrix, size) {
+			for (let i = 0; i < size; i++) {
+				const bit = i % 2 === 0 ? 1 : 0;
+				// Only set if not already occupied by finder patterns
+				if (matrix[6][i] === null) matrix[6][i] = bit;  // horizontal (row 6)
+				if (matrix[i][6] === null) matrix[i][6] = bit;  // vertical (column 6)
+			}
+		}
+
+		// Alignment patterns: 5x5 with black border, white inner, black center
+		function addAlignmentPatterns(matrix, version, size) {
+			if (version < 2) return;
+
+			const positions = ALIGNMENT_POSITIONS[version];
+
+			for (const row of positions) {
+				for (const col of positions) {
+					// Skip if overlapping with finder patterns
+					if (isInFinderPattern(row, col, size)) continue;
+
+					// Draw 5x5 alignment pattern centered at (row, col)
+					for (let r = -2; r <= 2; r++) {
+						for (let c = -2; c <= 2; c++) {
+							let isBlack;
+							if (Math.abs(r) === 2 || Math.abs(c) === 2) {
+								isBlack = true;  // outer border
+							} else if (r === 0 && c === 0) {
+								isBlack = true;  // center
+							} else {
+								isBlack = false; // inner white ring
+							}
+							matrix[row + r][col + c] = isBlack ? 1 : 0;
+						}
+					}
+				}
+			}
+		}
+
+		function isInFinderPattern(row, col, size) {
+			// Top-left finder + separator (0-7, 0-7)
+			if (row <= 7 && col <= 7) return true;
+			// Top-right finder + separator (0-7, size-8 to size-1)
+			if (row <= 7 && col >= size - 8) return true;
+			// Bottom-left finder + separator (size-8 to size-1, 0-7)
+			if (row >= size - 8 && col <= 7) return true;
+			return false;
+		}
+
+		// Dark module: always at position (x=8, y=4*version+9) per spec
+		// In our matrix[row][col] format, that's matrix[4*version+9][8]
+		function addDarkModule(matrix, version) {
+			matrix[4 * version + 9][8] = 1;
+		}
+
+		// Reserve format info areas (will be filled in later)
+		function reserveFormatAreas(matrix, size) {
+			// Around top-left finder
+			for (let i = 0; i < 9; i++) {
+				if (matrix[8][i] === null) matrix[8][i] = 0;
+				if (matrix[i][8] === null) matrix[i][8] = 0;
+			}
+
+			// Below top-right finder
+			for (let i = 0; i < 8; i++) {
+				if (matrix[8][size - 1 - i] === null) matrix[8][size - 1 - i] = 0;
+			}
+
+			// Right of bottom-left finder
+			for (let i = 0; i < 7; i++) {
+				if (matrix[size - 1 - i][8] === null) matrix[size - 1 - i][8] = 0;
+			}
+		}
+
+		// Reserve version info areas for version 7+
+		function reserveVersionAreas(matrix, size) {
+			// Bottom-left of top-right finder
+			for (let i = 0; i < 6; i++) {
+				for (let j = 0; j < 3; j++) {
+					matrix[i][size - 11 + j] = 0;
+				}
+			}
+			// Top-right of bottom-left finder
+			for (let i = 0; i < 6; i++) {
+				for (let j = 0; j < 3; j++) {
+					matrix[size - 11 + j][i] = 0;
+				}
+			}
+		}
+
+		// Create map of reserved (non-data) modules
+		function createReservedMap(matrix, size) {
+			const reserved = Array.from({ length: size }, () => Array(size).fill(false));
+
+			for (let row = 0; row < size; row++) {
+				for (let col = 0; col < size; col++) {
+					if (matrix[row][col] !== null) {
+						reserved[row][col] = true;
+					}
+				}
+			}
+
+			return reserved;
+		}
+
+		function encodeData(bytes, version) {
+			const bits = [];
+			const charCountBits = version <= 9 ? 8 : 16;
+
+			// Mode: byte (0100)
+			bits.push(0, 1, 0, 0);
+
+			// Character count
+			for (let i = charCountBits - 1; i >= 0; i--) {
+				bits.push((bytes.length >> i) & 1);
+			}
+
+			// Data
+			for (const byte of bytes) {
+				for (let i = 7; i >= 0; i--) {
+					bits.push((byte >> i) & 1);
+				}
+			}
+
+			// Terminator (up to 4 zeros)
+			const capacity = EC_TABLE[version][0] * 8;
+			for (let i = 0; i < 4 && bits.length < capacity; i++) {
+				bits.push(0);
+			}
+
+			// Pad to byte boundary
+			while (bits.length % 8 !== 0 && bits.length < capacity) {
+				bits.push(0);
+			}
+
+			// Pad codewords
+			const padBytes = [0xEC, 0x11];
+			let padIndex = 0;
+			while (bits.length < capacity) {
+				const pad = padBytes[padIndex++ % 2];
+				for (let i = 7; i >= 0; i--) {
+					bits.push((pad >> i) & 1);
+				}
+			}
+
+			return bits;
+		}
+
+		function addErrorCorrection(data, version) {
+			const [totalCap, ecPerBlock, g1Count, g1Data, g2Count, g2Data] = EC_TABLE[version];
+			
+			const dataBytes = [];
+			for (let i = 0; i < data.length; i += 8) {
+				let byte = 0;
+				for (let j = 0; j < 8; j++) byte = (byte << 1) | (data[i + j] || 0);
+				dataBytes.push(byte);
+			}
+
+			// Pad to full capacity
+			while (dataBytes.length < totalCap) {
+				dataBytes.push(dataBytes.length % 2 === 0 ? 0xEC : 0x11);
+			}
+
+			const blocks = [];
+			const ecBlocks = [];
+			let offset = 0;
+
+			// Create Group 1 Blocks
+			for (let i = 0; i < g1Count; i++) {
+				const block = dataBytes.slice(offset, offset + g1Data);
+				blocks.push(block);
+				ecBlocks.push(generateECBytes(block, ecPerBlock));
+				offset += g1Data;
+			}
+
+			// Create Group 2 Blocks
+			for (let i = 0; i < g2Count; i++) {
+				const block = dataBytes.slice(offset, offset + g2Data);
+				blocks.push(block);
+				ecBlocks.push(generateECBytes(block, ecPerBlock));
+				offset += g2Data;
+			}
+
+			const resultBytes = [];
+			const maxDataSize = Math.max(g1Data, g2Data);
+
+			// Interleave Data: Byte by byte across all blocks
+			for (let i = 0; i < maxDataSize; i++) {
+				for (let j = 0; j < blocks.length; j++) {
+					if (i < blocks[j].length) {
+						resultBytes.push(blocks[j][i]);
+					}
+				}
+			}
+
+			// Interleave EC: Byte by byte across all blocks (EC sizes are always equal)
+			for (let i = 0; i < ecPerBlock; i++) {
+				for (let j = 0; j < ecBlocks.length; j++) {
+					resultBytes.push(ecBlocks[j][i]);
+				}
+			}
+
+			const resultBits = [];
+			for (const byte of resultBytes) {
+				for (let i = 7; i >= 0; i--) resultBits.push((byte >> i) & 1);
+			}
+			return resultBits;
+		}
+
+		function generateECBytes(data, ecCount) {
+			const gen = [1];
+			for (let i = 0; i < ecCount; i++) {
+				const next = new Array(gen.length + 1).fill(0);
+				for (let j = 0; j < gen.length; j++) {
+					next[j] ^= gen[j];
+					next[j + 1] ^= gfMul(gen[j], GF_EXP[i]);
+				}
+				for (let j = 0; j < next.length; j++) gen[j] = next[j];
+				gen.length = next.length;
+			}
+
+			const remainder = new Array(ecCount).fill(0);
+			for (const byte of data) {
+				const factor = byte ^ remainder[0];
+				remainder.shift();
+				remainder.push(0);
+				for (let i = 0; i < ecCount; i++) {
+					remainder[i] ^= gfMul(gen[i + 1], factor);
+				}
+			}
+
+			return remainder;
+		}
+
+		// Place data in zigzag pattern from bottom-right, skipping column 6
+		function placeData(matrix, data, size) {
+			let bitIndex = 0;
+			let up = true;
+
+			for (let col = size - 1; col >= 1; col -= 2) {
+				if (col === 6) col = 5;  // skip timing pattern column
+
+				for (let i = 0; i < size; i++) {
+					const row = up ? size - 1 - i : i;
+
+					for (let j = 0; j < 2; j++) {
+						const c = col - j;
+						if (matrix[row][c] === null) {
+							matrix[row][c] = bitIndex < data.length ? data[bitIndex++] : 0;
+						}
+					}
+				}
+				up = !up;
+			}
+		}
+
+		function applyBestMask(matrix, size, reserved) {
+			let bestMask = 0;
+			let bestPenalty = Infinity;
+
+			for (let mask = 0; mask < 8; mask++) {
+				const copy = matrix.map(row => [...row]);
+				applyMask(copy, size, mask, reserved);
+				const penalty = calculatePenalty(copy, size);
+
+				if (penalty < bestPenalty) {
+					bestPenalty = penalty;
+					bestMask = mask;
+				}
+			}
+
+			applyMask(matrix, size, bestMask, reserved);
+			return bestMask;
+		}
+
+		function applyMask(matrix, size, mask, reserved) {
+			for (let row = 0; row < size; row++) {
+				for (let col = 0; col < size; col++) {
+					if (reserved[row][col]) continue;
+
+					let invert = false;
+					switch (mask) {
+						case 0: invert = (row + col) % 2 === 0; break;
+						case 1: invert = row % 2 === 0; break;
+						case 2: invert = col % 3 === 0; break;
+						case 3: invert = (row + col) % 3 === 0; break;
+						case 4: invert = (Math.floor(row / 2) + Math.floor(col / 3)) % 2 === 0; break;
+						case 5: invert = (row * col) % 2 + (row * col) % 3 === 0; break;
+						case 6: invert = ((row * col) % 2 + (row * col) % 3) % 2 === 0; break;
+						case 7: invert = ((row + col) % 2 + (row * col) % 3) % 2 === 0; break;
+					}
+
+					if (invert) matrix[row][col] ^= 1;
+				}
+			}
+		}
+
+		function calculatePenalty(matrix, size) {
+			let penalty = 0;
+
+			// Rule 1: 5+ consecutive same-color modules
+			for (let i = 0; i < size; i++) {
+				let rowRun = 1, colRun = 1;
+				for (let j = 1; j < size; j++) {
+					rowRun = matrix[i][j] === matrix[i][j-1] ? rowRun + 1 : 1;
+					if (rowRun === 5) penalty += 3;
+					else if (rowRun > 5) penalty += 1;
+
+					colRun = matrix[j][i] === matrix[j-1][i] ? colRun + 1 : 1;
+					if (colRun === 5) penalty += 3;
+					else if (colRun > 5) penalty += 1;
+				}
+			}
+
+			// Rule 2: 2x2 blocks of same color
+			for (let i = 0; i < size - 1; i++) {
+				for (let j = 0; j < size - 1; j++) {
+					const v = matrix[i][j];
+					if (v === matrix[i][j+1] && v === matrix[i+1][j] && v === matrix[i+1][j+1]) {
+						penalty += 3;
+					}
+				}
+			}
+
+			return penalty;
+		}
+
+		function addFormatInfo(matrix, size, mask) {
+			const format = (0 << 3) | mask; // Level M (00) + Mask
+			let rem = format;
+			for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+			const bits = ((format << 10) | rem) ^ 0x5412;
+
+			const getBit = (i) => (bits >> i) & 1;
+
+			const coords = [
+				[8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5], [8, 7], [8, 8], [7, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8]
+			];
+
+			for (let i = 0; i < 15; i++) {
+				const [r, c] = coords[i];
+				const bit = getBit(i);
+				// First copy
+				matrix[r][c] = bit;
+				// Second copy (mirrored around the other finders)
+				if (i < 8) {
+					matrix[8][size - 1 - i] = bit;
+				} else {
+					matrix[size - 1 - (14 - i)][8] = bit;
+				}
+			}
+		}
+
+		function addVersionInfo(matrix, version) {
+			if (version < 7) return;
+
+			// 18-bit BCH Error Corrected Version Codes
+			const versionBits = {
+				7:  0x07C94, 8:  0x085BC, 9:  0x09A99, 10: 0x0A4D3,
+				11: 0x0BBF6, 12: 0x0C762, 13: 0x0D847, 14: 0x0E60D,
+				15: 0x0F928, 16: 0x10B78, 17: 0x1145D, 18: 0x12A17,
+				19: 0x13532, 20: 0x149A6, 21: 0x15683, 22: 0x168C9,
+				23: 0x177EC, 24: 0x18EC4, 25: 0x191E1, 26: 0x1AFAB,
+				27: 0x1B08E, 28: 0x1CC1A, 29: 0x1D33F, 30: 0x1ED75,
+				31: 0x1F250, 32: 0x209D5, 33: 0x216F0, 34: 0x228BA,
+				35: 0x2379F, 36: 0x24B0B, 37: 0x2542E, 38: 0x26A64,
+				39: 0x27541, 40: 0x28C69
+			};
+
+			const bits = versionBits[version];
+			const size = matrix.length;
+
+			for (let i = 0; i < 18; i++) {
+				const bit = (bits >> i) & 1;
+				const a = Math.floor(i / 3);
+				const b = i % 3;
+
+				// Block 1: Bottom-left (6x3)
+				matrix[size - 11 + b][a] = bit;
+				// Block 2: Top-right (3x6)
+				matrix[a][size - 11 + b] = bit;
+			}
+		}
+
+		function handleResize() {
+			if (window.visualViewport) {
+				document.querySelector('.container').style.height = window.visualViewport.height + 'px';
+				window.scrollTo(0, 0);
+			}
+		}
+
+		if (window.visualViewport) {
+			window.visualViewport.addEventListener('resize', handleResize);
+			window.visualViewport.addEventListener('scroll', handleResize);
+		}
+
+		window.addEventListener('resize', handleResize);
+		handleResize();
+		input.addEventListener('input', () => generateQR(input.value));
+		input.focus();
+		document.addEventListener('click', () => input.focus());
+	</script>
+	<script>
+		if ('serviceWorker' in navigator) {
+			navigator.serviceWorker.register('sw.js');
+		}
+	</script>
+</body>
+</html>
