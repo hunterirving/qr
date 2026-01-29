@@ -27,17 +27,26 @@
 		}
 
 		.container {
-			max-width: 1000px;
 			width: 100%;
 			margin: 0 auto;
 			padding: 16px;
 			padding-top: 8px;
 			display: flex;
 			flex-direction: column;
-			align-items: center; 
+			align-items: center;
 			height: 100vh;
 			overflow: hidden;
 			box-sizing: border-box;
+		}
+
+		.qr-wrapper {
+			display: flex;
+			flex-direction: column;
+			align-items: flex-start;
+			flex: 1;
+			min-height: 0;
+			max-height: 100%;
+			max-width: 100%;
 		}
 
 		#url-input {
@@ -65,7 +74,6 @@
 			scrollbar-width: auto;
 			scrollbar-color: black white;
 			padding-bottom: 0;
-			/* margin-bottom: 16px; */
 		}
 
 		#url-input:empty:before {
@@ -84,6 +92,7 @@
 			flex: 1;
 			min-height: 0;
 			max-width: 100%;
+			max-height: 100%;
 			object-fit: contain;
 			width: auto;
 			height: auto;
@@ -96,19 +105,29 @@
 </head>
 <body>
 	<div class="container">
-		<div id="url-input" contenteditable="true" data-placeholder="enter a URL..." spellcheck="false" autocapitalize="off" autocorrect="off"></div>
-		<canvas id="qr-canvas"></canvas>
+		<div class="qr-wrapper">
+			<div id="url-input" contenteditable="true" data-placeholder="enter a URL..." spellcheck="false" autocapitalize="off" autocorrect="off"></div>
+			<canvas id="qr-canvas"></canvas>
+		</div>
 	</div>
 
 	<script>
 		const input = document.getElementById('url-input');
 		const canvas = document.getElementById('qr-canvas');
+		const wrapper = document.querySelector('.qr-wrapper');
 		const ctx = canvas.getContext('2d');
 		ctx.imageSmoothingEnabled = false;
 
+		function syncInputWidth() {
+			const canvasDisplayWidth = canvas.offsetWidth;
+			if (canvasDisplayWidth > 0) {
+				input.style.width = canvasDisplayWidth + 'px';
+			}
+		}
+
 		// Text resizing constants and state
 		const MAX_FONT_SIZE = 32;
-		const MIN_FONT_SIZE = 22;
+		const MIN_FONT_SIZE = 26;
 		let currentFontSize = MAX_FONT_SIZE;
 		let isMultiline = false;
 
@@ -345,28 +364,40 @@
 
 		const MAX_CAPACITY = 2331; // Max bytes for V40-M
 
+		// Target module size - canvas adjusts to be exact multiple
+		const TARGET_SIZE = 1024;
+
 		function generateQR(text) {
 			if (!text) {
-				canvas.width = 0;
-				canvas.height = 0;
+				// Use V1 size (21 modules) for empty state
+				const moduleSize = Math.round(TARGET_SIZE / 21);
+				const size = moduleSize * 21;
+				canvas.width = size;
+				canvas.height = size;
+				ctx.fillStyle = '#ffffff';
+				ctx.fillRect(0, 0, size, size);
+				requestAnimationFrame(syncInputWidth);
 				return;
 			}
 
 			const bytes = new TextEncoder().encode(text);
 			if (bytes.length > MAX_CAPACITY) {
-				// Render solid black square when over capacity
-				const size = 177 * 32; // V40 size
+				// Render solid black square when over capacity (V40 = 177 modules)
+				const moduleSize = Math.round(TARGET_SIZE / 177);
+				const size = moduleSize * 177;
 				canvas.width = size;
 				canvas.height = size;
 				ctx.fillStyle = '#000000';
 				ctx.fillRect(0, 0, size, size);
+				requestAnimationFrame(syncInputWidth);
 				return;
 			}
 
 			const qr = createQR(text);
-			const moduleSize = 32;
-			const margin = 0;
-			const size = qr.length * moduleSize + margin * 2 * moduleSize;
+			const modules = qr.length;
+			// Calculate module size and exact canvas size
+			const moduleSize = Math.round(TARGET_SIZE / modules);
+			const size = moduleSize * modules;
 
 			canvas.width = size;
 			canvas.height = size;
@@ -375,18 +406,21 @@
 			ctx.fillRect(0, 0, size, size);
 
 			ctx.fillStyle = '#000000';
-			for (let row = 0; row < qr.length; row++) {
-				for (let col = 0; col < qr.length; col++) {
+			for (let row = 0; row < modules; row++) {
+				for (let col = 0; col < modules; col++) {
 					if (qr[row][col]) {
 						ctx.fillRect(
-							(col + margin) * moduleSize,
-							(row + margin) * moduleSize,
+							col * moduleSize,
+							row * moduleSize,
 							moduleSize,
 							moduleSize
 						);
 					}
 				}
 			}
+
+			// Sync input width after canvas renders
+			requestAnimationFrame(syncInputWidth);
 		}
 
 		function createQR(text) {
@@ -863,8 +897,11 @@
 				document.querySelector('.container').style.height = window.visualViewport.height + 'px';
 				window.scrollTo(0, 0);
 			}
-			// Recalculate text sizing when viewport changes
-			adjustTextInput();
+			// Sync input width with canvas and recalculate text sizing
+			requestAnimationFrame(() => {
+				syncInputWidth();
+				adjustTextInput();
+			});
 		}
 
 		if (window.visualViewport) {
