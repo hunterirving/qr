@@ -54,8 +54,6 @@
 		.input-wrapper {
 			width: 100%;
 			box-sizing: border-box;
-			/* Minimum height for 3 lines */
-			min-height: calc(var(--font-size) * 1.2 * 3);
 			display: flex;
 			flex-direction: column;
 			justify-content: flex-end;
@@ -72,15 +70,14 @@
 			white-space: pre-wrap;
 			word-wrap: break-word;
 			overflow-wrap: break-word;
-			overflow-y: auto;
+			overflow-y: scroll;
 			overscroll-behavior: none;
 			line-height: 1.2;
-			scrollbar-width: none;
-			scrollbar-color: black white;
+			scrollbar-color: transparent transparent;
 		}
 
 		#url-input.show-scrollbar {
-			scrollbar-width: auto;
+			scrollbar-color: black white;
 		}
 
 		#url-input:empty:before {
@@ -138,6 +135,9 @@
 		const canvasMarginTop = 16; // margin-top on canvas
 		const threeLineHeight = lineHeight * 3;
 
+		// Set initial height
+		inputWrapper.style.height = threeLineHeight + 'px';
+
 		function getInputText() {
 			return (input.textContent || '').replace(/\n/g, '');
 		}
@@ -153,7 +153,6 @@
 			const wrapperWidth = wrapper.clientWidth;
 
 			// QR code size is the minimum of available width and (available height - input - margin)
-			// We want the QR code to be as large as possible while fitting everything
 			const qrSize = Math.min(wrapperWidth, availableHeight - threeLineHeight - canvasMarginTop);
 			const maxInputHeight = availableHeight - qrSize - canvasMarginTop;
 
@@ -168,7 +167,7 @@
 				// Clear innerHTML to ensure :empty selector works for placeholder
 				if (input.innerHTML !== '') input.innerHTML = '';
 				input.classList.remove('show-scrollbar');
-				inputWrapper.style.maxHeight = '';
+				inputWrapper.style.height = threeLineHeight + 'px';
 				input.style.maxHeight = '';
 				generateQR('');
 				return;
@@ -176,11 +175,20 @@
 
 			// Calculate dynamic max height based on available space
 			const maxHeight = calculateMaxInputHeight();
-			inputWrapper.style.maxHeight = maxHeight + 'px';
-			input.style.maxHeight = maxHeight + 'px';
+
+			// Temporarily remove max-height to measure true content height
+			input.style.maxHeight = 'none';
+			const contentHeight = input.scrollHeight;
+
+			// Clamp between 3 lines and max
+			const wrapperHeight = Math.max(threeLineHeight, Math.min(contentHeight, maxHeight));
+
+			// Set fixed height on wrapper to prevent layout shifts
+			inputWrapper.style.height = wrapperHeight + 'px';
+			input.style.maxHeight = wrapperHeight + 'px';
 
 			// Show scrollbar only when content exceeds the max height
-			if (input.scrollHeight > maxHeight) {
+			if (contentHeight > maxHeight) {
 				input.classList.add('show-scrollbar');
 			} else {
 				input.classList.remove('show-scrollbar');
