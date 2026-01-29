@@ -59,23 +59,22 @@
 			font-size: var(--font-size);
 			border: none;
 			margin: 0;
-			padding: 8px 0 16px 0;
+			padding: 8px 0 0 0;
 			outline: none;
-			white-space: nowrap;
-			overflow: hidden;
-			min-height: 1.2em;
-			line-height: 1.2;
-		}
-
-		#url-input.multiline {
 			white-space: pre-wrap;
 			word-wrap: break-word;
 			overflow-wrap: break-word;
 			overflow-y: auto;
 			overscroll-behavior: none;
-			scrollbar-width: auto;
+			line-height: 1.2;
+			/* Fixed height for 3 lines: 3 * (font-size * line-height) + padding-top */
+			height: calc(var(--font-size) * 1.2 * 3 + 8px);
+			scrollbar-width: none;
 			scrollbar-color: black white;
-			padding-bottom: 0;
+		}
+
+		#url-input.show-scrollbar {
+			scrollbar-width: auto;
 		}
 
 		#url-input:empty:before {
@@ -127,81 +126,31 @@
 			}
 		}
 
-		let isMultiline = false;
 		const fontSize = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-size'));
 		const lineHeight = fontSize * 1.2; // font-size * line-height
-		const canvasMarginTop = 16; // margin-top on canvas
-
-		// Create hidden measurement span
-		const measureSpan = document.createElement('span');
-		measureSpan.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font-family:system-ui,sans-serif;font-size:${fontSize}px;padding:0`;
-		document.body.appendChild(measureSpan);
-
-		function measureTextWidth(text) {
-			measureSpan.textContent = text;
-			return measureSpan.offsetWidth;
-		}
+		const inputPaddingTop = 8;
+		const threeLineHeight = lineHeight * 3 + inputPaddingTop;
 
 		function getInputText() {
 			return (input.textContent || '').replace(/\n/g, '');
 		}
 
-		function calculateMaxInputHeight() {
-			// Minimum 3 lines before showing scrollbar (plus top padding)
-			const inputPaddingTop = 8;
-			const minInputHeight = lineHeight * 3 + inputPaddingTop;
-
-			// Get available height for the wrapper (container height minus padding)
-			const container = document.querySelector('.container');
-			const containerHeight = container.clientHeight;
-			const containerPaddingTop = 0;
-			const containerPaddingBottom = 16;
-			const availableHeight = containerHeight - containerPaddingTop - containerPaddingBottom;
-
-			// The QR code is square and constrained by the wrapper width
-			// So the minimum QR size is the width of the wrapper
-			const wrapperWidth = wrapper.clientWidth;
-
-			// Available height for input = total available - canvas size - canvas margin
-			// But canvas size is constrained by width (it's square), so min canvas height = wrapper width
-			const minCanvasHeight = Math.min(wrapperWidth, availableHeight - lineHeight - canvasMarginTop);
-			const maxInputHeight = availableHeight - minCanvasHeight - canvasMarginTop;
-
-			// Use at least 3 lines, but allow more if space is available
-			return Math.max(minInputHeight, maxInputHeight);
-		}
-
 		function adjustTextInput() {
 			const text = getInputText();
-			const availableWidth = input.offsetWidth - 2; // Small buffer
 
 			if (!text) {
-				// Reset to default when empty
-				input.classList.remove('multiline');
-				input.style.maxHeight = '';
-				isMultiline = false;
 				// Clear innerHTML to ensure :empty selector works for placeholder
 				if (input.innerHTML !== '') input.innerHTML = '';
+				input.classList.remove('show-scrollbar');
 				generateQR('');
 				return;
 			}
 
-			// Check if text overflows at full size - if so, switch to multiline mode
-			const textWidth = measureTextWidth(text);
-			if (textWidth > availableWidth) {
-				if (!isMultiline) {
-					input.classList.add('multiline');
-					isMultiline = true;
-				}
-				// Calculate dynamic max height based on available space
-				const maxHeight = calculateMaxInputHeight();
-				input.style.maxHeight = maxHeight + 'px';
+			// Show scrollbar only when content exceeds 3 lines
+			if (input.scrollHeight > threeLineHeight) {
+				input.classList.add('show-scrollbar');
 			} else {
-				if (isMultiline) {
-					input.classList.remove('multiline');
-					input.style.maxHeight = '';
-					isMultiline = false;
-				}
+				input.classList.remove('show-scrollbar');
 			}
 
 			generateQR(text);
