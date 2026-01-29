@@ -238,20 +238,18 @@
 
 		function scrollToCursor() {
 			const sel = window.getSelection();
-			if (sel.rangeCount > 0) {
-				const range = sel.getRangeAt(0);
-				// Create a temporary span at cursor position to get its coordinates
-				const span = document.createElement('span');
-				range.insertNode(span);
-				const spanRect = span.getBoundingClientRect();
+			if (sel.rangeCount > 0 && sel.focusNode) {
+				// Use selection coordinates directly instead of inserting a span
+				const range = sel.getRangeAt(0).cloneRange();
+				range.collapse(true);
+				const rects = range.getClientRects();
+				if (rects.length === 0) return;
+
+				const cursorRect = rects[0];
 				const inputRect = input.getBoundingClientRect();
-				span.remove();
-				// Normalize selection after removing span
-				sel.removeAllRanges();
-				sel.addRange(range);
 
 				// Scroll if cursor is outside visible area
-				const cursorY = spanRect.top - inputRect.top + input.scrollTop;
+				const cursorY = cursorRect.top - inputRect.top + input.scrollTop;
 				const visibleTop = input.scrollTop;
 				const visibleBottom = input.scrollTop + input.clientHeight;
 
