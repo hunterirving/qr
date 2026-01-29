@@ -67,7 +67,6 @@
 			white-space: pre-wrap;
 			word-wrap: break-word;
 			overflow-wrap: break-word;
-			max-height: calc(1.2em * 3);
 			overflow-y: auto;
 			overscroll-behavior: none;
 			scrollbar-width: auto;
@@ -125,6 +124,8 @@
 		}
 
 		let isMultiline = false;
+		const lineHeight = 32 * 1.2; // font-size * line-height
+		const canvasMarginTop = 16; // margin-top on canvas
 
 		// Create hidden measurement span
 		const measureSpan = document.createElement('span');
@@ -140,6 +141,30 @@
 			return (input.textContent || '').replace(/\n/g, '');
 		}
 
+		function calculateMaxInputHeight() {
+			// Minimum 3 lines before showing scrollbar
+			const minInputHeight = lineHeight * 3;
+
+			// Get available height for the wrapper (container height minus padding)
+			const container = document.querySelector('.container');
+			const containerHeight = container.clientHeight;
+			const containerPaddingTop = 8;
+			const containerPaddingBottom = 16;
+			const availableHeight = containerHeight - containerPaddingTop - containerPaddingBottom;
+
+			// The QR code is square and constrained by the wrapper width
+			// So the minimum QR size is the width of the wrapper
+			const wrapperWidth = wrapper.clientWidth;
+
+			// Available height for input = total available - canvas size - canvas margin
+			// But canvas size is constrained by width (it's square), so min canvas height = wrapper width
+			const minCanvasHeight = Math.min(wrapperWidth, availableHeight - lineHeight - canvasMarginTop);
+			const maxInputHeight = availableHeight - minCanvasHeight - canvasMarginTop;
+
+			// Use at least 3 lines, but allow more if space is available
+			return Math.max(minInputHeight, maxInputHeight);
+		}
+
 		function adjustTextInput() {
 			const text = getInputText();
 			const availableWidth = input.offsetWidth - 2; // Small buffer
@@ -147,6 +172,7 @@
 			if (!text) {
 				// Reset to default when empty
 				input.classList.remove('multiline');
+				input.style.maxHeight = '';
 				isMultiline = false;
 				// Clear innerHTML to ensure :empty selector works for placeholder
 				if (input.innerHTML !== '') input.innerHTML = '';
@@ -161,9 +187,13 @@
 					input.classList.add('multiline');
 					isMultiline = true;
 				}
+				// Calculate dynamic max height based on available space
+				const maxHeight = calculateMaxInputHeight();
+				input.style.maxHeight = maxHeight + 'px';
 			} else {
 				if (isMultiline) {
 					input.classList.remove('multiline');
+					input.style.maxHeight = '';
 					isMultiline = false;
 				}
 			}
@@ -856,8 +886,14 @@
 				document.querySelector('.container').style.height = window.visualViewport.height + 'px';
 				window.scrollTo(0, 0);
 			}
-			// Sync input width with canvas
-			requestAnimationFrame(syncInputWidth);
+			// Sync input width with canvas and recalculate max height if in multiline mode
+			requestAnimationFrame(() => {
+				syncInputWidth();
+				if (isMultiline) {
+					const maxHeight = calculateMaxInputHeight();
+					input.style.maxHeight = maxHeight + 'px';
+				}
+			});
 		}
 
 		if (window.visualViewport) {
