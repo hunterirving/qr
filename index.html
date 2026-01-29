@@ -10,6 +10,10 @@
 	<link rel="apple-touch-icon" href="icon.png?v=2">
 	<link rel="icon" href="icon.png">
 	<style>
+		:root {
+			--font-size: 32px;
+		}
+
 		html {
 			overscroll-behavior: none;
 			height: 100%;
@@ -30,7 +34,7 @@
 			width: 100%;
 			margin: 0 auto;
 			padding: 16px;
-			padding-top: 8px;
+			padding-top: 0;
 			display: flex;
 			flex-direction: column;
 			align-items: center;
@@ -42,7 +46,7 @@
 		.qr-wrapper {
 			display: flex;
 			flex-direction: column;
-			align-items: flex-start;
+			align-items: center;
 			flex: 1;
 			min-height: 0;
 			max-height: 100%;
@@ -52,10 +56,10 @@
 		#url-input {
 			width: 100%;
 			box-sizing: border-box;
-			font-size: 32px;
+			font-size: var(--font-size);
 			border: none;
 			margin: 0;
-			padding: 0 0 16px 0;
+			padding: 8px 0 16px 0;
 			outline: none;
 			white-space: nowrap;
 			overflow: hidden;
@@ -124,12 +128,13 @@
 		}
 
 		let isMultiline = false;
-		const lineHeight = 32 * 1.2; // font-size * line-height
+		const fontSize = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-size'));
+		const lineHeight = fontSize * 1.2; // font-size * line-height
 		const canvasMarginTop = 16; // margin-top on canvas
 
 		// Create hidden measurement span
 		const measureSpan = document.createElement('span');
-		measureSpan.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font-family:system-ui,sans-serif;font-size:32px;padding:0';
+		measureSpan.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font-family:system-ui,sans-serif;font-size:${fontSize}px;padding:0`;
 		document.body.appendChild(measureSpan);
 
 		function measureTextWidth(text) {
@@ -142,13 +147,14 @@
 		}
 
 		function calculateMaxInputHeight() {
-			// Minimum 3 lines before showing scrollbar
-			const minInputHeight = lineHeight * 3;
+			// Minimum 3 lines before showing scrollbar (plus top padding)
+			const inputPaddingTop = 8;
+			const minInputHeight = lineHeight * 3 + inputPaddingTop;
 
 			// Get available height for the wrapper (container height minus padding)
 			const container = document.querySelector('.container');
 			const containerHeight = container.clientHeight;
-			const containerPaddingTop = 8;
+			const containerPaddingTop = 0;
 			const containerPaddingBottom = 16;
 			const availableHeight = containerHeight - containerPaddingTop - containerPaddingBottom;
 
@@ -886,13 +892,10 @@
 				document.querySelector('.container').style.height = window.visualViewport.height + 'px';
 				window.scrollTo(0, 0);
 			}
-			// Sync input width with canvas and recalculate max height if in multiline mode
+			// Sync input width and re-evaluate text layout
 			requestAnimationFrame(() => {
 				syncInputWidth();
-				if (isMultiline) {
-					const maxHeight = calculateMaxInputHeight();
-					input.style.maxHeight = maxHeight + 'px';
-				}
+				adjustTextInput();
 			});
 		}
 
