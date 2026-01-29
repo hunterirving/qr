@@ -47,24 +47,18 @@
 			display: flex;
 			flex-direction: column;
 			align-items: center;
-			justify-content: flex-start;
 			max-height: 100%;
-			width: 100%;
-			flex: 1;
-			min-height: 0;
-		}
-
-		.visual-offset {
-			flex-shrink: 0;
+			max-width: 100%;
 		}
 
 		.input-wrapper {
 			width: 100%;
 			box-sizing: border-box;
+			/* Fixed height for 3 lines */
+			height: calc(var(--font-size) * 1.2 * 3);
 			display: flex;
 			flex-direction: column;
 			justify-content: flex-end;
-			flex-shrink: 0;
 		}
 
 		#url-input {
@@ -78,14 +72,16 @@
 			white-space: pre-wrap;
 			word-wrap: break-word;
 			overflow-wrap: break-word;
-			overflow-y: scroll;
+			overflow-y: auto;
 			overscroll-behavior: none;
 			line-height: 1.2;
-			scrollbar-color: transparent transparent;
+			max-height: calc(var(--font-size) * 1.2 * 3);
+			scrollbar-width: none;
+			scrollbar-color: black white;
 		}
 
 		#url-input.show-scrollbar {
-			scrollbar-color: black white;
+			scrollbar-width: auto;
 		}
 
 		#url-input:empty:before {
@@ -101,8 +97,13 @@
 
 		#qr-canvas {
 			display: block;
+			flex: 1;
+			min-height: 0;
 			max-width: 100%;
+			max-height: 100%;
 			object-fit: contain;
+			width: auto;
+			height: auto;
 			aspect-ratio: 1 / 1;
 			background: white;
 			box-sizing: border-box;
@@ -117,7 +118,6 @@
 				<div id="url-input" contenteditable="true" data-placeholder="enter a URL..." spellcheck="false" autocapitalize="off" autocorrect="off"></div>
 			</div>
 			<canvas id="qr-canvas"></canvas>
-			<div class="visual-offset"></div>
 		</div>
 	</div>
 
@@ -126,7 +126,6 @@
 		const inputWrapper = document.querySelector('.input-wrapper');
 		const canvas = document.getElementById('qr-canvas');
 		const wrapper = document.querySelector('.qr-wrapper');
-		const visualOffset = document.querySelector('.visual-offset');
 		const ctx = canvas.getContext('2d');
 		ctx.imageSmoothingEnabled = false;
 
@@ -139,126 +138,31 @@
 
 		const fontSize = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-size'));
 		const lineHeight = fontSize * 1.2; // font-size * line-height
-		const canvasMarginTop = 16; // margin-top on canvas
-		const minInputHeight = lineHeight * 3; // minimum 3 lines
-
-		// Set initial height
-		inputWrapper.style.height = minInputHeight + 'px';
+		const threeLineHeight = lineHeight * 3;
 
 		function getInputText() {
 			return (input.textContent || '').replace(/\n/g, '');
 		}
 
-		function calculateLayout() {
-			// Get available height for the wrapper (container height minus padding)
-			const container = document.querySelector('.container');
-			const containerHeight = container.clientHeight;
-			const containerPadding = 32; // 16px top + 16px bottom
-			const availableHeight = containerHeight - containerPadding;
-
-			// The QR code is square and constrained by the wrapper width
-			const wrapperWidth = wrapper.clientWidth;
-
-			// QR gets priority: it fills the width, and we give input at least 1 line
-			// Max QR size is constrained by available height minus minimum input space
-			const maxQrByHeight = availableHeight - minInputHeight - canvasMarginTop;
-			const maxQrSize = Math.min(wrapperWidth, maxQrByHeight);
-
-			// Input gets remaining space after QR takes its share
-			const maxInputHeight = availableHeight - maxQrSize - canvasMarginTop;
-
-			return {
-				maxQrSize: Math.max(0, maxQrSize),
-				maxInputHeight: Math.max(minInputHeight, maxInputHeight)
-			};
-		}
-
 		function adjustTextInput() {
 			const text = getInputText();
-
-			const layout = calculateLayout();
-
-			// Set canvas max-height to constrain QR code size
-			canvas.style.maxHeight = layout.maxQrSize + 'px';
-
-			// Measure content height
-			input.style.maxHeight = 'none';
-			inputWrapper.style.height = 'auto';
-			const contentHeight = text ? input.scrollHeight : minInputHeight;
 
 			if (!text) {
 				// Clear innerHTML to ensure :empty selector works for placeholder
 				if (input.innerHTML !== '') input.innerHTML = '';
 				input.classList.remove('show-scrollbar');
-				inputWrapper.style.height = minInputHeight + 'px';
-				input.style.maxHeight = '';
 				generateQR('');
-				updateVisualOffset(minInputHeight, layout);
 				return;
 			}
 
-			// Clamp between 1 line and max available
-			const wrapperHeight = Math.max(minInputHeight, Math.min(contentHeight, layout.maxInputHeight));
-
-			// Set fixed height on wrapper to prevent layout shifts
-			inputWrapper.style.height = wrapperHeight + 'px';
-			input.style.maxHeight = wrapperHeight + 'px';
-
-			// Show scrollbar only when content exceeds the available space
-			if (contentHeight > layout.maxInputHeight) {
+			// Show scrollbar only when content exceeds 3 lines
+			if (input.scrollHeight > threeLineHeight) {
 				input.classList.add('show-scrollbar');
 			} else {
 				input.classList.remove('show-scrollbar');
 			}
 
-			// Scroll to keep cursor visible
-			scrollToCursor();
-
 			generateQR(text);
-			updateVisualOffset(wrapperHeight, layout);
-		}
-
-		function updateVisualOffset(inputHeight, layout) {
-			// Calculate how much space is used by content
-			const contentUsed = inputHeight + canvasMarginTop + layout.maxQrSize;
-
-			// Get available height
-			const container = document.querySelector('.container');
-			const containerHeight = container.clientHeight;
-			const containerPadding = 32;
-			const availableHeight = containerHeight - containerPadding;
-
-			// Remaining space that can be used for visual offset
-			const remainingSpace = availableHeight - contentUsed;
-
-			// Use half of remaining space as offset (to visually center), capped at minInputHeight
-			const offsetHeight = Math.min(minInputHeight, Math.max(0, remainingSpace / 2));
-			visualOffset.style.height = offsetHeight + 'px';
-		}
-
-		function scrollToCursor() {
-			const sel = window.getSelection();
-			if (sel.rangeCount > 0 && sel.focusNode) {
-				// Use selection coordinates directly instead of inserting a span
-				const range = sel.getRangeAt(0).cloneRange();
-				range.collapse(true);
-				const rects = range.getClientRects();
-				if (rects.length === 0) return;
-
-				const cursorRect = rects[0];
-				const inputRect = input.getBoundingClientRect();
-
-				// Scroll if cursor is outside visible area
-				const cursorY = cursorRect.top - inputRect.top + input.scrollTop;
-				const visibleTop = input.scrollTop;
-				const visibleBottom = input.scrollTop + input.clientHeight;
-
-				if (cursorY < visibleTop) {
-					input.scrollTop = cursorY;
-				} else if (cursorY + lineHeight > visibleBottom) {
-					input.scrollTop = cursorY + lineHeight - input.clientHeight;
-				}
-			}
 		}
 
 		function stripNewlines() {
@@ -947,11 +851,8 @@
 				container.style.height = window.visualViewport.height + 'px';
 				window.scrollTo(0, 0);
 			}
-			// Re-evaluate layout to fit available space
-			requestAnimationFrame(() => {
-				adjustTextInput();
-				syncInputWidth();
-			});
+			// Sync input width with canvas
+			requestAnimationFrame(syncInputWidth);
 		}
 
 		if (window.visualViewport) {
@@ -961,6 +862,8 @@
 
 		window.addEventListener('resize', handleResize);
 		handleResize();
+		// Render initial white square so placeholder text is positioned correctly
+		generateQR('');
 		input.addEventListener('input', onInputChange);
 		input.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter') {
