@@ -1,4 +1,4 @@
-const CACHE_NAME = 'qr-v5';
+const CACHE_NAME = 'qr-v6';
 const urlsToCache = [
   '/qr/',
   '/qr/index.html',
