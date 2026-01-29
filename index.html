@@ -54,8 +54,6 @@
 		.input-wrapper {
 			width: 100%;
 			box-sizing: border-box;
-			/* Fixed height for 3 lines */
-			height: calc(var(--font-size) * 1.2 * 3);
 			display: flex;
 			flex-direction: column;
 			justify-content: flex-end;
@@ -72,16 +70,14 @@
 			white-space: pre-wrap;
 			word-wrap: break-word;
 			overflow-wrap: break-word;
-			overflow-y: auto;
+			overflow-y: scroll;
 			overscroll-behavior: none;
 			line-height: 1.2;
-			max-height: calc(var(--font-size) * 1.2 * 3);
-			scrollbar-width: none;
-			scrollbar-color: black white;
+			scrollbar-color: transparent transparent;
 		}
 
 		#url-input.show-scrollbar {
-			scrollbar-width: auto;
+			scrollbar-color: black white;
 		}
 
 		#url-input:empty:before {
@@ -140,6 +136,9 @@
 		const lineHeight = fontSize * 1.2; // font-size * line-height
 		const threeLineHeight = lineHeight * 3;
 
+		// Set initial wrapper height to reserve 3 lines of space
+		inputWrapper.style.height = threeLineHeight + 'px';
+
 		function getInputText() {
 			return (input.textContent || '').replace(/\n/g, '');
 		}
@@ -151,9 +150,15 @@
 				// Clear innerHTML to ensure :empty selector works for placeholder
 				if (input.innerHTML !== '') input.innerHTML = '';
 				input.classList.remove('show-scrollbar');
+				inputWrapper.style.height = threeLineHeight + 'px';
+				input.style.maxHeight = '';
 				generateQR('');
 				return;
 			}
+
+			// Set max-height to 3 lines so text is constrained within wrapper
+			inputWrapper.style.height = threeLineHeight + 'px';
+			input.style.maxHeight = threeLineHeight + 'px';
 
 			// Show scrollbar only when content exceeds 3 lines
 			if (input.scrollHeight > threeLineHeight) {
