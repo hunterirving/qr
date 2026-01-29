@@ -13,7 +13,8 @@
 		html {
 			overscroll-behavior: none;
 			height: 100%;
-			overflow: hidden; 
+			overflow: hidden;
+			touch-action: manipulation;
 		}
 
 		body {
@@ -22,6 +23,7 @@
 			overscroll-behavior: none;
 			height: 100%;
 			overflow: hidden;
+			touch-action: manipulation;
 		}
 
 		.container {
@@ -46,6 +48,30 @@
 			margin: 0;
 			padding: 0 0 16px 0;
 			outline: none;
+			white-space: nowrap;
+			overflow: hidden;
+			min-height: 1.2em;
+			line-height: 1.2;
+			transition: font-size 50ms ease-out;
+		}
+
+		#url-input.multiline {
+			white-space: pre-wrap;
+			word-wrap: break-word;
+			overflow-wrap: break-word;
+			max-height: calc(1.2em * 3);
+			overflow-y: auto;
+			overscroll-behavior: none;
+			scrollbar-width: auto;
+			scrollbar-color: black white;
+			padding-bottom: 0;
+			/* margin-bottom: 16px; */
+		}
+
+		#url-input:empty:before {
+			content: attr(data-placeholder);
+			color: #999;
+			pointer-events: none;
 		}
 
 		#url-input::selection {
@@ -64,12 +90,13 @@
 			aspect-ratio: 1 / 1;
 			background: white;
 			box-sizing: border-box;
+			margin-top: 16px;
 		}
 	</style>
 </head>
 <body>
 	<div class="container">
-		<input type="text" id="url-input" placeholder="enter a URL..." autocomplete="off" autofocus>
+		<div id="url-input" contenteditable="true" data-placeholder="enter a URL..." spellcheck="false" autocapitalize="off" autocorrect="off"></div>
 		<canvas id="qr-canvas"></canvas>
 	</div>
 
@@ -78,6 +105,121 @@
 		const canvas = document.getElementById('qr-canvas');
 		const ctx = canvas.getContext('2d');
 		ctx.imageSmoothingEnabled = false;
+
+		// Text resizing constants and state
+		const MAX_FONT_SIZE = 32;
+		const MIN_FONT_SIZE = 22;
+		let currentFontSize = MAX_FONT_SIZE;
+		let isMultiline = false;
+
+		// Create hidden measurement span
+		const measureSpan = document.createElement('span');
+		measureSpan.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font-family:system-ui,sans-serif;padding:0';
+		document.body.appendChild(measureSpan);
+
+		function measureTextWidth(text, fontSize) {
+			measureSpan.style.fontSize = fontSize + 'px';
+			measureSpan.textContent = text;
+			return measureSpan.offsetWidth;
+		}
+
+		function calculateOptimalFontSize(text, availableWidth) {
+			if (!text) return MAX_FONT_SIZE;
+
+			// Check if text fits at minimum size - if not, return 0 to signal multiline needed
+			if (measureTextWidth(text, MIN_FONT_SIZE) > availableWidth) {
+				return 0;
+			}
+
+			let low = MIN_FONT_SIZE;
+			let high = MAX_FONT_SIZE;
+			let result = MIN_FONT_SIZE;
+
+			while (low <= high) {
+				const mid = Math.floor((low + high) / 2);
+				const width = measureTextWidth(text, mid);
+
+				if (width <= availableWidth) {
+					result = mid;
+					low = mid + 1;
+				} else {
+					high = mid - 1;
+				}
+			}
+
+			return result;
+		}
+
+		function getInputText() {
+			return (input.textContent || '').replace(/\n/g, '');
+		}
+
+		function adjustTextInput() {
+			const text = getInputText();
+			const availableWidth = input.offsetWidth - 2; // Small buffer
+
+			if (!text) {
+				// Reset to default when empty
+				input.classList.remove('multiline');
+				input.style.fontSize = MAX_FONT_SIZE + 'px';
+				currentFontSize = MAX_FONT_SIZE;
+				isMultiline = false;
+				// Clear innerHTML to ensure :empty selector works for placeholder
+				if (input.innerHTML !== '') input.innerHTML = '';
+				generateQR('');
+				return;
+			}
+
+			const optimalSize = calculateOptimalFontSize(text, availableWidth);
+
+			if (optimalSize > 0) {
+				// Single-line mode - text fits at this font size
+				if (isMultiline) {
+					input.classList.remove('multiline');
+					isMultiline = false;
+				}
+				input.style.fontSize = optimalSize + 'px';
+				currentFontSize = optimalSize;
+			} else {
+				// Multiline mode - text doesn't fit even at minimum size
+				if (!isMultiline) {
+					input.classList.add('multiline');
+					isMultiline = true;
+				}
+				input.style.fontSize = MIN_FONT_SIZE + 'px';
+				currentFontSize = MIN_FONT_SIZE;
+			}
+
+			generateQR(text);
+		}
+
+		function stripNewlines() {
+			const text = input.textContent || '';
+			if (text.includes('\n')) {
+				const sel = window.getSelection();
+				const cursorAtEnd = sel.rangeCount > 0 && sel.getRangeAt(0).startOffset === text.length;
+				input.textContent = text.replace(/\n/g, '');
+				if (cursorAtEnd || sel.rangeCount === 0) {
+					// Restore cursor to end
+					const range = document.createRange();
+					range.selectNodeContents(input);
+					range.collapse(false);
+					sel.removeAllRanges();
+					sel.addRange(range);
+				}
+			}
+		}
+
+		let rafPending = false;
+		function onInputChange() {
+			if (rafPending) return;
+			rafPending = true;
+			requestAnimationFrame(() => {
+				rafPending = false;
+				stripNewlines();
+				adjustTextInput();
+			});
+		}
 
 		// Galois Field tables for Reed-Solomon
 		const GF_EXP = new Array(512);
@@ -721,6 +863,8 @@
 				document.querySelector('.container').style.height = window.visualViewport.height + 'px';
 				window.scrollTo(0, 0);
 			}
+			// Recalculate text sizing when viewport changes
+			adjustTextInput();
 		}
 
 		if (window.visualViewport) {
@@ -730,9 +874,17 @@
 
 		window.addEventListener('resize', handleResize);
 		handleResize();
-		input.addEventListener('input', () => generateQR(input.value));
+		input.addEventListener('input', onInputChange);
+		input.addEventListener('keydown', (e) => {
+			if (e.key === 'Enter') {
+				e.preventDefault();
+			}
+		});
 		input.focus();
 		document.addEventListener('click', () => input.focus());
+		document.addEventListener('wheel', (e) => {
+			if (e.ctrlKey) e.preventDefault();
+		}, { passive: false });
 	</script>
 	<script>
 		if ('serviceWorker' in navigator) {
