@@ -61,7 +61,6 @@
 			overflow: hidden;
 			min-height: 1.2em;
 			line-height: 1.2;
-			transition: font-size 20ms ease-out;
 		}
 
 		#url-input.multiline {
@@ -125,48 +124,16 @@
 			}
 		}
 
-		// Text resizing constants and state
-		const MAX_FONT_SIZE = 32;
-		const MIN_FONT_SIZE = 26;
-		let currentFontSize = MAX_FONT_SIZE;
 		let isMultiline = false;
 
 		// Create hidden measurement span
 		const measureSpan = document.createElement('span');
-		measureSpan.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font-family:system-ui,sans-serif;padding:0';
+		measureSpan.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;font-family:system-ui,sans-serif;font-size:32px;padding:0';
 		document.body.appendChild(measureSpan);
 
-		function measureTextWidth(text, fontSize) {
-			measureSpan.style.fontSize = fontSize + 'px';
+		function measureTextWidth(text) {
 			measureSpan.textContent = text;
 			return measureSpan.offsetWidth;
-		}
-
-		function calculateOptimalFontSize(text, availableWidth) {
-			if (!text) return MAX_FONT_SIZE;
-
-			// Check if text fits at minimum size - if not, return 0 to signal multiline needed
-			if (measureTextWidth(text, MIN_FONT_SIZE) > availableWidth) {
-				return 0;
-			}
-
-			let low = MIN_FONT_SIZE;
-			let high = MAX_FONT_SIZE;
-			let result = MIN_FONT_SIZE;
-
-			while (low <= high) {
-				const mid = Math.floor((low + high) / 2);
-				const width = measureTextWidth(text, mid);
-
-				if (width <= availableWidth) {
-					result = mid;
-					low = mid + 1;
-				} else {
-					high = mid - 1;
-				}
-			}
-
-			return result;
 		}
 
 		function getInputText() {
@@ -180,8 +147,6 @@
 			if (!text) {
 				// Reset to default when empty
 				input.classList.remove('multiline');
-				input.style.fontSize = MAX_FONT_SIZE + 'px';
-				currentFontSize = MAX_FONT_SIZE;
 				isMultiline = false;
 				// Clear innerHTML to ensure :empty selector works for placeholder
 				if (input.innerHTML !== '') input.innerHTML = '';
@@ -189,24 +154,18 @@
 				return;
 			}
 
-			const optimalSize = calculateOptimalFontSize(text, availableWidth);
-
-			if (optimalSize > 0) {
-				// Single-line mode - text fits at this font size
-				if (isMultiline) {
-					input.classList.remove('multiline');
-					isMultiline = false;
-				}
-				input.style.fontSize = optimalSize + 'px';
-				currentFontSize = optimalSize;
-			} else {
-				// Multiline mode - text doesn't fit even at minimum size
+			// Check if text overflows at full size - if so, switch to multiline mode
+			const textWidth = measureTextWidth(text);
+			if (textWidth > availableWidth) {
 				if (!isMultiline) {
 					input.classList.add('multiline');
 					isMultiline = true;
 				}
-				input.style.fontSize = MIN_FONT_SIZE + 'px';
-				currentFontSize = MIN_FONT_SIZE;
+			} else {
+				if (isMultiline) {
+					input.classList.remove('multiline');
+					isMultiline = false;
+				}
 			}
 
 			generateQR(text);
@@ -897,11 +856,8 @@
 				document.querySelector('.container').style.height = window.visualViewport.height + 'px';
 				window.scrollTo(0, 0);
 			}
-			// Sync input width with canvas and recalculate text sizing
-			requestAnimationFrame(() => {
-				syncInputWidth();
-				adjustTextInput();
-			});
+			// Sync input width with canvas
+			requestAnimationFrame(syncInputWidth);
 		}
 
 		if (window.visualViewport) {
