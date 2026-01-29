@@ -67,8 +67,8 @@
 			overflow-y: auto;
 			overscroll-behavior: none;
 			line-height: 1.2;
-			/* Fixed height for 3 lines: 3 * (font-size * line-height) + padding-top */
-			height: calc(var(--font-size) * 1.2 * 3 + 8px);
+			/* Minimum height for 3 lines: 3 * (font-size * line-height) + padding-top */
+			min-height: calc(var(--font-size) * 1.2 * 3 + 8px);
 			scrollbar-width: none;
 			scrollbar-color: black white;
 		}
@@ -129,10 +129,30 @@
 		const fontSize = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--font-size'));
 		const lineHeight = fontSize * 1.2; // font-size * line-height
 		const inputPaddingTop = 8;
+		const canvasMarginTop = 16; // margin-top on canvas
 		const threeLineHeight = lineHeight * 3 + inputPaddingTop;
 
 		function getInputText() {
 			return (input.textContent || '').replace(/\n/g, '');
+		}
+
+		function calculateMaxInputHeight() {
+			// Get available height for the wrapper (container height minus padding)
+			const container = document.querySelector('.container');
+			const containerHeight = container.clientHeight;
+			const containerPaddingBottom = 16;
+			const availableHeight = containerHeight - containerPaddingBottom;
+
+			// The QR code is square and constrained by the wrapper width
+			const wrapperWidth = wrapper.clientWidth;
+
+			// Available height for input = total available - canvas size - canvas margin
+			// Canvas size is constrained by width (it's square), so min canvas height = wrapper width
+			const minCanvasHeight = Math.min(wrapperWidth, availableHeight - threeLineHeight - canvasMarginTop);
+			const maxInputHeight = availableHeight - minCanvasHeight - canvasMarginTop;
+
+			// Use at least 3 lines, but allow more if space is available
+			return Math.max(threeLineHeight, maxInputHeight);
 		}
 
 		function adjustTextInput() {
@@ -142,12 +162,17 @@
 				// Clear innerHTML to ensure :empty selector works for placeholder
 				if (input.innerHTML !== '') input.innerHTML = '';
 				input.classList.remove('show-scrollbar');
+				input.style.maxHeight = '';
 				generateQR('');
 				return;
 			}
 
-			// Show scrollbar only when content exceeds 3 lines
-			if (input.scrollHeight > threeLineHeight) {
+			// Calculate dynamic max height based on available space
+			const maxHeight = calculateMaxInputHeight();
+			input.style.maxHeight = maxHeight + 'px';
+
+			// Show scrollbar only when content exceeds the max height
+			if (input.scrollHeight > maxHeight) {
 				input.classList.add('show-scrollbar');
 			} else {
 				input.classList.remove('show-scrollbar');
