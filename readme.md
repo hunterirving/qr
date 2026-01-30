@@ -4,4 +4,13 @@ a minimal <a href="https://hunterirving.github.io/web_workshop/pages/pwa">Progre
 
 useful for sharing links to your other PWAs with nearby friends :-)
 
-<img src="screenshot.jpeg" width=400px;>
+<i><a href="https://hunterirving.github.io/qr/">try it now in your browser</a> !</i>
+
+<a href="https://hunterirving.github.io/qr/">
+<img src="screenshot.jpeg" width=250px;>
+</a>
+
+<hr>
+
+<i>PS: you can pass an optional <a href="https://hunterirving.github.io/qr?url=https://example.com">url parameter</a> to bookmark your favorite QR codes for easy access.</i>
+
