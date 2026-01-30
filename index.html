@@ -98,7 +98,7 @@
 			display: block;
 			min-height: 0;
 			max-width: 100%;
-			max-height: calc(100vh - var(--font-size) * 1.2 * 3 - 32px - 16px);
+			max-height: calc(100vh - var(--font-size) * 1.2 * 3 * 2 - 32px - 16px);
 			object-fit: contain;
 			width: auto;
 			height: auto;
@@ -106,6 +106,29 @@
 			background: white;
 			box-sizing: border-box;
 			margin-top: 16px;
+		}
+
+		.bottom-spacer {
+			height: calc(var(--font-size) * 1.2 * 3);
+			flex-shrink: 0;
+		}
+
+		@media (max-height: 700px) {
+			.bottom-spacer {
+				display: none;
+			}
+
+			#qr-canvas {
+				max-height: calc(100vh - var(--font-size) * 1.2 * 3 - 32px - 16px);
+			}
+		}
+
+		body.keyboard-visible .bottom-spacer {
+			display: none;
+		}
+
+		body.keyboard-visible #qr-canvas {
+			max-height: calc(100vh - var(--font-size) * 1.2 * 3 - 32px - 16px);
 		}
 	</style>
 </head>
@@ -116,6 +139,7 @@
 				<div id="url-input" contenteditable="true" data-placeholder="enter a URL..." spellcheck="false" autocapitalize="off" autocorrect="off"></div>
 			</div>
 			<canvas id="qr-canvas"></canvas>
+			<div class="bottom-spacer"></div>
 		</div>
 	</div>
 
@@ -138,8 +162,20 @@
 		const lineHeight = fontSize * 1.2; // font-size * line-height
 		const threeLineHeight = lineHeight * 3;
 
+		const BREAK_CHARS = /[/:_\-?&=.#@]/;
+
 		function getInputText() {
 			return (input.textContent || '').replace(/\n/g, '');
+		}
+
+		function insertBreakOpportunities(text) {
+			// Build HTML with <wbr> after URL break characters
+			let html = '';
+			for (const char of text) {
+				html += char.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+				if (BREAK_CHARS.test(char)) html += '<wbr>';
+			}
+			return html;
 		}
 
 		function adjustTextInput() {
@@ -163,21 +199,52 @@
 			generateQR(text);
 		}
 
-		function stripNewlines() {
-			const text = input.textContent || '';
-			if (text.includes('\n')) {
-				const sel = window.getSelection();
-				const cursorAtEnd = sel.rangeCount > 0 && sel.getRangeAt(0).startOffset === text.length;
-				input.textContent = text.replace(/\n/g, '');
-				if (cursorAtEnd || sel.rangeCount === 0) {
-					// Restore cursor to end
+		function getCursorPosition() {
+			const sel = window.getSelection();
+			if (!sel.rangeCount) return 0;
+			const range = sel.getRangeAt(0);
+			let pos = 0;
+			const treeWalker = document.createTreeWalker(input, NodeFilter.SHOW_TEXT);
+			let node;
+			while ((node = treeWalker.nextNode())) {
+				if (node === range.startContainer) {
+					pos += range.startOffset;
+					break;
+				}
+				pos += node.textContent.length;
+			}
+			return pos;
+		}
+
+		function setCursorPosition(pos) {
+			const sel = window.getSelection();
+			const treeWalker = document.createTreeWalker(input, NodeFilter.SHOW_TEXT);
+			let node;
+			let remaining = pos;
+			while ((node = treeWalker.nextNode())) {
+				if (remaining <= node.textContent.length) {
 					const range = document.createRange();
-					range.selectNodeContents(input);
-					range.collapse(false);
+					range.setStart(node, remaining);
+					range.collapse(true);
 					sel.removeAllRanges();
 					sel.addRange(range);
+					return;
 				}
+				remaining -= node.textContent.length;
 			}
+			// If position is past the end, place cursor at end
+			const range = document.createRange();
+			range.selectNodeContents(input);
+			range.collapse(false);
+			sel.removeAllRanges();
+			sel.addRange(range);
+		}
+
+		function formatInput() {
+			const rawText = getInputText();
+			const cursorPos = getCursorPosition();
+			input.innerHTML = insertBreakOpportunities(rawText);
+			setCursorPosition(cursorPos);
 		}
 
 		let rafPending = false;
@@ -186,7 +253,7 @@
 			rafPending = true;
 			requestAnimationFrame(() => {
 				rafPending = false;
-				stripNewlines();
+				formatInput();
 				adjustTextInput();
 			});
 		}
@@ -848,6 +915,9 @@
 			if (window.visualViewport) {
 				container.style.height = window.visualViewport.height + 'px';
 				window.scrollTo(0, 0);
+				// Detect keyboard by comparing visualViewport to window height
+				const keyboardVisible = window.visualViewport.height < window.innerHeight * 0.85;
+				document.body.classList.toggle('keyboard-visible', keyboardVisible);
 			}
 			// Sync input width with canvas and re-evaluate scrollbar
 			requestAnimationFrame(() => {
