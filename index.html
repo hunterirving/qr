@@ -951,6 +951,10 @@
 				e.preventDefault();
 			}
 		});
+		input.addEventListener('focus', () => {
+			const text = getInputText();
+			if (text) setCursorPosition(text.length);
+		});
 		input.focus();
 		document.addEventListener('click', () => input.focus());
 		document.addEventListener('wheel', (e) => {
